@@ -3,7 +3,7 @@ const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
 const client = new SSMClient();
 let ssmCache;
 
-const replaceExpression = /\{\{(early-resolve|early-resolve-with-default):ssm:([^|]*)(\|(.*))?\}\}/g;
+const replaceExpression = /\{\{(early-resolve|early-resolve-with-default):ssm:([^|]*)(\|([^}]*))?\}\}/g;
 
 // A slightly modified version of https://dev.to/ycmjason/stringprototypereplace-asynchronously-28k9
 // without the Promise.all to not parallelize the SSM calls.
