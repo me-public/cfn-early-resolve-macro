@@ -29,6 +29,31 @@ Resources:
       PropKey: "{{early-resolve:ssm:/${Environment}/infra/vpc-id}}"
 ```
 
+Cross-region SSM lookups
+------------------------
+
+By default, EarlyResolve reads SSM in the same region as the macro Lambda (the stack region).
+For DR / secondary regions that need primary-region parameter values, set a default region on
+the Transform, or override per expression.
+
+**Transform `Region`** — default for all lookups in the template:
+
+```yaml
+Transform:
+  - Name: EarlyResolve
+    Parameters:
+      Region: us-east-1
+```
+
+**Per-expression region prefix** — overrides Transform `Region` for that path only:
+
+```
+{{early-resolve:ssm:us-east-1:/${Environment}/infra/master-domain}}
+{{early-resolve-with-default:ssm:us-east-1:/${Environment}/infra/foo|fallback}}
+```
+
+Precedence: expression region > Transform `Region` > Lambda/stack region.
+
 Supported resolvers
 -------------------
 
@@ -36,6 +61,7 @@ There is only one supported resolver in here which resolves SSM (Parameter Store
 
 ```
 {{early-resolve:ssm:<path-to-param>}}
+{{early-resolve:ssm:<aws-region>:<path-to-param>}}
 ```
 
 Where `<path-to-param>` can mix strings and template parameter references, for example:
@@ -45,6 +71,7 @@ Where `<path-to-param>` can mix strings and template parameter references, for e
 ```
 
 The parameter replacement happens in this Macro, hence you do not need to `!Sub` it.
+An optional `<aws-region>:` prefix selects a specific AWS region for that lookup (see Cross-region SSM lookups).
 
 Default value fallback
 ----------------------

@@ -1,7 +1,10 @@
 const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
 
-const client = new SSMClient();
+const REGION_PREFIX = /^([a-z]{2}(?:-[a-z]+)+-\d+):(.*)$/i;
+
+let ssmClients;
 let ssmCache;
+let defaultRegion;
 
 const replaceExpression = /\{\{(early-resolve|early-resolve-with-default):ssm:([^|]*)(\|(.*))?\}\}/g;
 
@@ -28,9 +31,30 @@ function replaceParams(str, params) {
   return replaced;
 }
 
-async function getSSMParameter(parameter) {
-  if (parameter in ssmCache) {
-    console.log('Using cached parameter', parameter);
+function parseParameterAndRegion(ssmParameter) {
+  const match = ssmParameter.match(REGION_PREFIX);
+  if (match) {
+    return { parameterName: match[2], region: match[1] };
+  }
+  return { parameterName: ssmParameter, region: undefined };
+}
+
+function getClient(region) {
+  const key = region || '';
+  if (!ssmClients[key]) {
+    ssmClients[key] = region ? new SSMClient({ region }) : new SSMClient();
+  }
+  return ssmClients[key];
+}
+
+function cacheKey(parameter, region) {
+  return `${region || ''}:${parameter}`;
+}
+
+async function getSSMParameter(parameter, region) {
+  const key = cacheKey(parameter, region);
+  if (key in ssmCache) {
+    console.log('Using cached parameter', parameter, 'region', region || 'default');
   } else {
     let ret;
     try {
@@ -38,9 +62,9 @@ async function getSSMParameter(parameter) {
         if (parameter.includes('default-resolve')) {
           throw new Error(`Could not find ${parameter} in SSM`);
         }
-        ret = 'mocked';
+        ret = region ? `mocked@${region}` : 'mocked';
       } else {
-        const rsp = await client.send(new GetParameterCommand({
+        const rsp = await getClient(region).send(new GetParameterCommand({
           Name: parameter,
           WithDecryption: true
         }));
@@ -48,12 +72,12 @@ async function getSSMParameter(parameter) {
       }
     } catch (e) {
       console.warn(e);
-      throw new Error(`Failed to resolve param: ${parameter}`);
+      throw new Error(`Failed to resolve param: ${parameter}${region ? ` (region ${region})` : ''}`);
     }
-    ssmCache[parameter] = ret;
+    ssmCache[key] = ret;
   }
 
-  return ssmCache[parameter];
+  return ssmCache[key];
 }
 
 async function deepReplace(object, params) {
@@ -64,9 +88,11 @@ async function deepReplace(object, params) {
   if (typeof object === 'string') {
     return await asyncStringReplace(object, replaceExpression, async (match, resolveType, ssmParameter, pipe, defaultValue) => {
       try {
-        const parameterName = replaceParams(ssmParameter, params);
-        console.log("Resolving parameter:", match, ssmParameter, parameterName);
-        return await getSSMParameter(parameterName);
+        const substituted = replaceParams(ssmParameter, params);
+        const { parameterName, region: expressionRegion } = parseParameterAndRegion(substituted);
+        const region = expressionRegion || defaultRegion;
+        console.log("Resolving parameter:", match, ssmParameter, parameterName, "region", region || "default");
+        return await getSSMParameter(parameterName, region);
       } catch (e) {
         if (resolveType === 'early-resolve-with-default') {
           return defaultValue || "";
@@ -89,6 +115,9 @@ async function deepReplace(object, params) {
 exports.handler = async (event, context) => {
   try {
     ssmCache = {};
+    ssmClients = {};
+    const macroParams = event["params"] || {};
+    defaultRegion = macroParams.Region || undefined;
 
     console.log("Parsing event:", JSON.stringify(event));
     const template = event["fragment"] || {};

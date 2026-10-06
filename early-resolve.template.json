@@ -10,12 +10,29 @@
         "Timeout": 30,
         "Policies": [
           {
-            "SSMParameterReadPolicy": {
-              "ParameterName": "*"
-            }
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ssm:DescribeParameters"
+                ],
+                "Resource": "*"
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ssm:GetParameter",
+                  "ssm:GetParameters",
+                  "ssm:GetParametersByPath"
+                ],
+                "Resource": {
+                  "Fn::Sub": "arn:${AWS::Partition}:ssm:*:${AWS::AccountId}:parameter/*"
+                }
+              }
+            ]
           }
         ],
-        "InlineCode": "const{SSMClient:SSMClient,GetParameterCommand:GetParameterCommand}=require(\"@aws-sdk/client-ssm\"),client=new SSMClient;let ssmCache;const replaceExpression=/\\{\\{(early-resolve|early-resolve-with-default):ssm:([^|]*)(\\|(.*))?\\}\\}/g,asyncStringReplace=async(e,r,t)=>{const a=[];let s,n=0;for(;null!==(s=r.exec(e));)a.push(e.slice(n,s.index)),a.push(await t(...s)),n=r.lastIndex;return a.push(e.slice(n)),a.join(\"\")};function replaceParams(e,r){let t=e;for(const[e,a]of Object.entries(r))t=t.replace(`\\${${e}}`,a);return t}async function getSSMParameter(e){if(e in ssmCache)console.log(\"Using cached parameter\",e);else{let r;try{if(process.env.TEST){if(e.includes(\"default-resolve\"))throw new Error(`Could not find ${e} in SSM`);r=\"mocked\"}else{r=(await client.send(new GetParameterCommand({Name:e,WithDecryption:!0}))).Parameter.Value}}catch(r){throw console.warn(r),new Error(`Failed to resolve param: ${e}`)}ssmCache[e]=r}return ssmCache[e]}async function deepReplace(e,r){if(null===e||\"boolean\"==typeof e||\"number\"==typeof e)return e;if(\"string\"==typeof e)return await asyncStringReplace(e,replaceExpression,(async(e,t,a,s,n)=>{try{const t=replaceParams(a,r);return console.log(\"Resolving parameter:\",e,a,t),await getSSMParameter(t)}catch(e){if(\"early-resolve-with-default\"===t)return n||\"\";throw e}}));if(\"object\"==typeof e){for(const t in e)e[t]=await deepReplace(e[t],r);return e}return e}exports.handler=async(e,r)=>{try{ssmCache={},console.log(\"Parsing event:\",JSON.stringify(e));const r=e.fragment||{},t=e.templateParameterValues||{},a=await deepReplace(r,t);return{requestId:e.requestId,status:\"success\",fragment:a}}catch(r){return console.error(r),{requestId:e.requestId,status:\"failure\",errorMessage:r.message}}};"
+        "InlineCode": "const{SSMClient:SSMClient,GetParameterCommand:GetParameterCommand}=require(\"@aws-sdk/client-ssm\"),REGION_PREFIX=/^([a-z]{2}(?:-[a-z]+)+-\\d+):(.*)$/i;let ssmClients,ssmCache,defaultRegion;const replaceExpression=/\\{\\{(early-resolve|early-resolve-with-default):ssm:([^|]*)(\\|(.*))?\\}\\}/g,asyncStringReplace=async(e,r,t)=>{const a=[];let n,s=0;for(;null!==(n=r.exec(e));)a.push(e.slice(s,n.index)),a.push(await t(...n)),s=r.lastIndex;return a.push(e.slice(s)),a.join(\"\")};function replaceParams(e,r){let t=e;for(const[e,a]of Object.entries(r))t=t.replace(`\\${${e}}`,a);return t}function parseParameterAndRegion(e){const r=e.match(REGION_PREFIX);return r?{parameterName:r[2],region:r[1]}:{parameterName:e,region:void 0}}function getClient(e){const r=e||\"\";return ssmClients[r]||(ssmClients[r]=e?new SSMClient({region:e}):new SSMClient),ssmClients[r]}function cacheKey(e,r){return`${r||\"\"}:${e}`}async function getSSMParameter(e,r){const t=cacheKey(e,r);if(t in ssmCache)console.log(\"Using cached parameter\",e,\"region\",r||\"default\");else{let a;try{if(process.env.TEST){if(e.includes(\"default-resolve\"))throw new Error(`Could not find ${e} in SSM`);a=r?`mocked@${r}`:\"mocked\"}else{a=(await getClient(r).send(new GetParameterCommand({Name:e,WithDecryption:!0}))).Parameter.Value}}catch(t){throw console.warn(t),new Error(`Failed to resolve param: ${e}${r?` (region ${r})`:\"\"}`)}ssmCache[t]=a}return ssmCache[t]}async function deepReplace(e,r){if(null===e||\"boolean\"==typeof e||\"number\"==typeof e)return e;if(\"string\"==typeof e)return await asyncStringReplace(e,replaceExpression,(async(e,t,a,n,s)=>{try{const t=replaceParams(a,r),{parameterName:n,region:s}=parseParameterAndRegion(t),o=s||defaultRegion;return console.log(\"Resolving parameter:\",e,a,n,\"region\",o||\"default\"),await getSSMParameter(n,o)}catch(e){if(\"early-resolve-with-default\"===t)return s||\"\";throw e}}));if(\"object\"==typeof e){for(const t in e)e[t]=await deepReplace(e[t],r);return e}return e}exports.handler=async(e,r)=>{try{ssmCache={},ssmClients={};const r=e.params||{};defaultRegion=r.Region||void 0,console.log(\"Parsing event:\",JSON.stringify(e));const t=e.fragment||{},a=e.templateParameterValues||{},n=await deepReplace(t,a);return{requestId:e.requestId,status:\"success\",fragment:n}}catch(r){return console.error(r),{requestId:e.requestId,status:\"failure\",errorMessage:r.message}}};"
       }
     },
     "Macro": {
